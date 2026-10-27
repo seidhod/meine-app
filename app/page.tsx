@@ -1,60 +1,77 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import styles from "./page.module.css";
 
-type Status = "ready" | "playing" | "paused" | "over";
-type Action = "flap" | "pause" | "restart";
+type Mode = "menu" | "help" | "playing" | "paused" | "over";
+type Action = "start" | "flap" | "pause" | "menu" | "help";
 
-type Obstacle = {
+type Gate = {
   x: number;
   center: number;
   collected: boolean;
   passed: boolean;
 };
 
+type Particle = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+};
+
 type Game = {
-  status: Status;
+  mode: Mode;
   y: number;
   velocity: number;
-  obstacles: Obstacle[];
+  gates: Gate[];
+  particles: Particle[];
   score: number;
   tools: number;
   passed: number;
   best: number;
+  record: boolean;
   time: number;
   distance: number;
+  bonus: number;
 };
 
-const WIDTH = 420;
-const HEIGHT = 640;
-const FLOOR = 590;
-const PLAYER_X = 104;
-const RADIUS = 17;
-const PIPE_WIDTH = 68;
-const GAP = 186;
-const SPACING = 255;
-const STORAGE_KEY = "flappy-paul-best-v1";
+type View = Pick<
+  Game,
+  "mode" | "score" | "tools" | "best" | "record"
+>;
 
-function createGame(best = 0): Game {
+const W = 420;
+const H = 700;
+const FLOOR = 650;
+const PX = 105;
+const RADIUS = 17;
+const GATE_WIDTH = 68;
+const GAP = 198;
+const SPACING = 265;
+const RECORD_KEY = "flappy-paul-best-v1";
+
+function freshGame(best = 0): Game {
   return {
-    status: "ready",
-    y: 290,
+    mode: "menu",
+    y: 320,
     velocity: 0,
-    obstacles: [],
+    gates: [],
+    particles: [],
     score: 0,
     tools: 0,
     passed: 0,
     best,
+    record: false,
     time: 0,
     distance: 0,
+    bonus: 0,
   };
 }
 
-function circleHitsRect(
+function hitsRectangle(
   cx: number,
   cy: number,
-  radius: number,
   x: number,
   y: number,
   width: number,
@@ -65,41 +82,129 @@ function circleHitsRect(
 
   return (
     (cx - nearestX) ** 2 + (cy - nearestY) ** 2 <
-    radius ** 2
+    RADIUS ** 2
   );
 }
 
-function drawCloud(
+function drawPaul(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  size: number,
+  angle: number,
+  time: number,
 ) {
-  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+
+  // Flügel.
+  ctx.fillStyle = "#f6fdff";
+  ctx.strokeStyle = "#b2d2df";
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.ellipse(x, y, size, size * 0.35, 0, 0, Math.PI * 2);
   ctx.ellipse(
-    x - size * 0.35,
-    y - size * 0.2,
-    size * 0.45,
-    size * 0.4,
-    0,
-    0,
-    Math.PI * 2,
-  );
-  ctx.ellipse(
-    x + size * 0.15,
-    y - size * 0.3,
-    size * 0.5,
-    size * 0.5,
-    0,
+    -22,
+    15,
+    18,
+    9,
+    -0.5 + Math.sin(time * 18) * 0.25,
     0,
     Math.PI * 2,
   );
   ctx.fill();
+  ctx.stroke();
+
+  // Shirt.
+  ctx.fillStyle = "#3478f6";
+  ctx.beginPath();
+  ctx.roundRect(-16, 13, 33, 21, 9);
+  ctx.fill();
+
+  ctx.fillStyle = "white";
+  ctx.textAlign = "center";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText("P", 1, 29);
+
+  // Ohren.
+  ctx.fillStyle = "#efb78c";
+  ctx.beginPath();
+  ctx.arc(-23, 0, 6, 0, Math.PI * 2);
+  ctx.arc(23, 0, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Gesicht.
+  ctx.fillStyle = "#ffd1a6";
+  ctx.beginPath();
+  ctx.arc(0, -3, 25, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Blonde Haare.
+  ctx.fillStyle = "#ffd347";
+  ctx.beginPath();
+  ctx.moveTo(-25, -7);
+  ctx.bezierCurveTo(-30, -39, 21, -42, 26, -10);
+  ctx.lineTo(17, -17);
+  ctx.lineTo(11, -9);
+  ctx.lineTo(3, -18);
+  ctx.lineTo(-5, -10);
+  ctx.lineTo(-13, -18);
+  ctx.lineTo(-20, -7);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = "#e6ad28";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-16, -24);
+  ctx.quadraticCurveTo(-2, -32, 13, -24);
+  ctx.stroke();
+
+  // Brille.
+  ctx.strokeStyle = "#24344b";
+  ctx.fillStyle = "rgba(231,250,255,0.8)";
+  ctx.lineWidth = 3;
+
+  for (const x of [-11, 11]) {
+    ctx.beginPath();
+    ctx.roundRect(x - 9, -9, 18, 16, 5);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(-2, -3);
+  ctx.lineTo(2, -3);
+  ctx.moveTo(-25, -5);
+  ctx.lineTo(-20, -4);
+  ctx.moveTo(20, -4);
+  ctx.lineTo(25, -5);
+  ctx.stroke();
+
+  // Augen.
+  ctx.fillStyle = "#24344b";
+  ctx.beginPath();
+  ctx.arc(-9, -1, 2.5, 0, Math.PI * 2);
+  ctx.arc(13, -1, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Wangen.
+  ctx.fillStyle = "rgba(238,128,109,0.4)";
+  ctx.beginPath();
+  ctx.ellipse(-16, 10, 5, 3, 0, 0, Math.PI * 2);
+  ctx.ellipse(18, 10, 5, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Lächeln.
+  ctx.strokeStyle = "#a85d4c";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(3, 9, 7, 0.15, Math.PI - 0.15);
+  ctx.stroke();
+
+  ctx.restore();
 }
 
-function drawScrewdriver(
+function drawTool(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
@@ -108,248 +213,149 @@ function drawScrewdriver(
   ctx.save();
   ctx.translate(x, y + Math.sin(time * 4) * 4);
 
-  ctx.fillStyle = "rgba(255, 222, 89, 0.18)";
+  ctx.fillStyle = "rgba(255,218,94,0.22)";
   ctx.beginPath();
-  ctx.arc(0, 0, 25, 0, Math.PI * 2);
+  ctx.arc(0, 0, 27, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = "#ffd85c";
+  ctx.strokeStyle = "#ffdc69";
   ctx.lineWidth = 2;
-  ctx.setLineDash([4, 5]);
   ctx.beginPath();
-  ctx.arc(0, 0, 23, time, time + Math.PI * 2);
+  ctx.arc(0, 0, 24, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.setLineDash([]);
 
   ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = "#edf8ff";
+  ctx.fillRect(-3, -20, 6, 27);
 
-  // Metallschaft und flache Spitze.
-  ctx.fillStyle = "#dce9f5";
-  ctx.fillRect(-3, -19, 6, 25);
+  ctx.fillStyle = "#9db5c9";
+  ctx.fillRect(-5, -25, 10, 7);
 
-  ctx.fillStyle = "#9aafc4";
-  ctx.fillRect(-5, -24, 10, 7);
-
-  // Orangefarbener Griff.
-  ctx.fillStyle = "#ff773d";
+  ctx.fillStyle = "#ff7840";
   ctx.beginPath();
-  ctx.roundRect(-8, 1, 16, 22, 5);
+  ctx.roundRect(-8, 1, 16, 23, 5);
   ctx.fill();
 
-  ctx.fillStyle = "#a83b25";
-  ctx.fillRect(-3, 5, 2, 13);
-  ctx.fillRect(2, 5, 2, 13);
+  ctx.fillStyle = "#ad3f25";
+  ctx.fillRect(-3, 6, 2, 13);
+  ctx.fillRect(2, 6, 2, 13);
 
   ctx.restore();
 }
 
-function drawPaul(ctx: CanvasRenderingContext2D, game: Game) {
-  ctx.save();
+function drawScene(
+  ctx: CanvasRenderingContext2D,
+  game: Game,
+) {
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#79c8f4");
+  sky.addColorStop(0.65, "#d2f0f6");
+  sky.addColorStop(1, "#ffe4ad");
 
-  const idle =
-    game.status === "ready" ? Math.sin(game.time * 3) * 7 : 0;
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, W, H);
 
-  ctx.translate(PLAYER_X, game.y + idle);
-
-  const tilt =
-    game.status === "playing"
-      ? Math.max(-0.35, Math.min(0.85, game.velocity / 650))
-      : 0;
-
-  ctx.rotate(tilt);
-
-  // Kleine Flügel hinter Paul.
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "#a8cce1";
-  ctx.lineWidth = 2;
-
+  // Sonne.
+  ctx.fillStyle = "#fff0ae";
   ctx.beginPath();
-  ctx.ellipse(
-    -21,
-    15,
-    18,
-    8,
-    -0.5 + Math.sin(game.time * 18) * 0.25,
-    0,
-    Math.PI * 2,
-  );
-  ctx.fill();
-  ctx.stroke();
-
-  // Blaues Shirt.
-  ctx.fillStyle = "#317bfa";
-  ctx.beginPath();
-  ctx.roundRect(-15, 14, 31, 18, 8);
+  ctx.arc(342, 115, 43, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 12px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText("P", 1, 28);
+  // Wolken.
+  ctx.fillStyle = "rgba(255,255,255,0.75)";
 
-  // Ohren.
-  ctx.fillStyle = "#efb888";
-  ctx.beginPath();
-  ctx.arc(-22, 0, 6, 0, Math.PI * 2);
-  ctx.arc(22, 0, 6, 0, Math.PI * 2);
-  ctx.fill();
+  for (let i = 0; i < 6; i++) {
+    const x =
+      ((i * 135 - game.distance * 0.15) % 810 + 810) %
+        810 -
+      90;
+    const y = 110 + (i % 3) * 75;
 
-  // Kopf.
-  ctx.fillStyle = "#ffd1a3";
-  ctx.beginPath();
-  ctx.arc(0, -3, 24, 0, Math.PI * 2);
-  ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x, y, 42, 13, 0, 0, Math.PI * 2);
+    ctx.ellipse(x - 15, y - 9, 22, 17, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + 13, y - 13, 24, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  // Blonde Haare.
-  ctx.fillStyle = "#ffd34e";
+  // Hügel.
+  ctx.fillStyle = "#9fc8be";
   ctx.beginPath();
-  ctx.moveTo(-24, -7);
-  ctx.bezierCurveTo(-29, -34, 19, -40, 25, -11);
-  ctx.lineTo(15, -17);
-  ctx.lineTo(10, -9);
-  ctx.lineTo(3, -18);
-  ctx.lineTo(-5, -10);
-  ctx.lineTo(-12, -18);
-  ctx.lineTo(-20, -7);
+  ctx.moveTo(0, FLOOR);
+  ctx.lineTo(0, 490);
+  ctx.bezierCurveTo(100, 390, 190, 560, 290, 450);
+  ctx.bezierCurveTo(360, 390, 400, 450, W, 440);
+  ctx.lineTo(W, FLOOR);
   ctx.closePath();
   ctx.fill();
 
-  ctx.strokeStyle = "#e4a82b";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-16, -23);
-  ctx.quadraticCurveTo(-3, -31, 11, -24);
-  ctx.stroke();
-
-  // Brillengläser.
-  ctx.fillStyle = "rgba(225,247,255,0.7)";
-  ctx.strokeStyle = "#23334d";
-  ctx.lineWidth = 3;
-
-  for (const x of [-11, 11]) {
-    ctx.beginPath();
-    ctx.roundRect(x - 9, -9, 18, 15, 5);
-    ctx.fill();
-    ctx.stroke();
-  }
-
-  ctx.beginPath();
-  ctx.moveTo(-2, -3);
-  ctx.lineTo(2, -3);
-  ctx.moveTo(-24, -5);
-  ctx.lineTo(-20, -4);
-  ctx.moveTo(20, -4);
-  ctx.lineTo(24, -5);
-  ctx.stroke();
-
-  // Augen.
-  ctx.fillStyle = "#23334d";
-  ctx.beginPath();
-  ctx.arc(-9, -1, 2.4, 0, Math.PI * 2);
-  ctx.arc(13, -1, 2.4, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Nase und Lächeln.
-  ctx.strokeStyle = "#c88562";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(3, 3);
-  ctx.lineTo(5, 8);
-  ctx.lineTo(1, 8);
-  ctx.stroke();
-
-  ctx.strokeStyle = "#9b4d43";
-  ctx.beginPath();
-  ctx.arc(3, 9, 7, 0.15, Math.PI - 0.15);
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-function drawScene(ctx: CanvasRenderingContext2D, game: Game) {
-  const sky = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-  sky.addColorStop(0, "#91d8ff");
-  sky.addColorStop(0.7, "#d8f5ff");
-  sky.addColorStop(1, "#fff0c2");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-  // Sonne.
-  ctx.fillStyle = "#fff2a7";
-  ctx.beginPath();
-  ctx.arc(345, 90, 40, 0, Math.PI * 2);
-  ctx.fill();
-
-  for (let i = 0; i < 5; i++) {
-    const x =
-      ((i * 145 - game.distance * 0.18) % 700 + 700) % 700 - 100;
-    drawCloud(ctx, x, 90 + (i % 3) * 65, 35 + (i % 2) * 12);
-  }
-
-  // Werkstattgebäude im Hintergrund.
+  // Kleine Werkstattgebäude.
   for (let i = 0; i < 9; i++) {
     const x =
-      ((i * 85 - game.distance * 0.3) % 765 + 765) % 765 - 85;
-    const height = 65 + (i % 3) * 24;
+      ((i * 85 - game.distance * 0.3) % 765 + 765) %
+        765 -
+      85;
+    const height = 75 + (i % 3) * 22;
 
-    ctx.fillStyle = i % 2 === 0 ? "#9abac7" : "#b3cbd1";
-    ctx.fillRect(x, FLOOR - height, 70, height);
+    ctx.fillStyle = i % 2 ? "#85a9b4" : "#a1bdc4";
+    ctx.fillRect(x, FLOOR - height, 72, height);
 
-    ctx.fillStyle = "#e5f5ef";
+    ctx.fillStyle = "#e3f3df";
+
     for (let row = 0; row < 2; row++) {
       for (let col = 0; col < 3; col++) {
         ctx.fillRect(
-          x + 9 + col * 19,
-          FLOOR - height + 14 + row * 25,
+          x + 10 + col * 19,
+          FLOOR - height + 16 + row * 27,
           10,
-          13,
+          14,
         );
       }
     }
   }
 
   // Hindernisse.
-  for (const obstacle of game.obstacles) {
-    const top = obstacle.center - GAP / 2;
-    const bottom = obstacle.center + GAP / 2;
+  for (const gate of game.gates) {
+    const top = gate.center - GAP / 2;
+    const bottom = gate.center + GAP / 2;
 
     const metal = ctx.createLinearGradient(
-      obstacle.x,
+      gate.x,
       0,
-      obstacle.x + PIPE_WIDTH,
+      gate.x + GATE_WIDTH,
       0,
     );
-    metal.addColorStop(0, "#184a67");
-    metal.addColorStop(0.45, "#3987a4");
-    metal.addColorStop(1, "#123b56");
+    metal.addColorStop(0, "#153b55");
+    metal.addColorStop(0.45, "#367b99");
+    metal.addColorStop(1, "#163a53");
 
     ctx.fillStyle = metal;
-    ctx.fillRect(obstacle.x, 0, PIPE_WIDTH, top);
+    ctx.fillRect(gate.x, 0, GATE_WIDTH, top);
     ctx.fillRect(
-      obstacle.x,
+      gate.x,
       bottom,
-      PIPE_WIDTH,
+      GATE_WIDTH,
       FLOOR - bottom,
     );
 
-    // Gelbe Schutzkanten.
-    ctx.fillStyle = "#ffca50";
-    ctx.fillRect(obstacle.x, top - 18, PIPE_WIDTH, 18);
-    ctx.fillRect(obstacle.x, bottom, PIPE_WIDTH, 18);
+    ctx.fillStyle = "#ffca55";
+    ctx.fillRect(gate.x, top - 18, GATE_WIDTH, 18);
+    ctx.fillRect(gate.x, bottom, GATE_WIDTH, 18);
 
-    ctx.fillStyle = "#815e25";
+    ctx.fillStyle = "#7d5b2b";
+
     for (let i = 0; i < 4; i++) {
-      ctx.fillRect(obstacle.x + i * 18 + 4, top - 15, 7, 12);
-      ctx.fillRect(obstacle.x + i * 18 + 4, bottom + 3, 7, 12);
+      ctx.fillRect(gate.x + 5 + i * 18, top - 15, 7, 12);
+      ctx.fillRect(gate.x + 5 + i * 18, bottom + 3, 7, 12);
     }
 
-    // Schrauben auf den Metallträgern.
-    ctx.fillStyle = "#a5d6e5";
-    for (const y of [top - 35, bottom + 35]) {
+    ctx.fillStyle = "#b8dce6";
+
+    for (const y of [top - 34, bottom + 34]) {
       ctx.beginPath();
-      ctx.arc(obstacle.x + 12, y, 3, 0, Math.PI * 2);
+      ctx.arc(gate.x + 12, y, 3, 0, Math.PI * 2);
       ctx.arc(
-        obstacle.x + PIPE_WIDTH - 12,
+        gate.x + GATE_WIDTH - 12,
         y,
         3,
         0,
@@ -358,51 +364,140 @@ function drawScene(ctx: CanvasRenderingContext2D, game: Game) {
       ctx.fill();
     }
 
-    if (!obstacle.collected) {
-      drawScrewdriver(
+    if (!gate.collected) {
+      drawTool(
         ctx,
-        obstacle.x + PIPE_WIDTH / 2,
-        obstacle.center,
+        gate.x + GATE_WIDTH / 2,
+        gate.center,
         game.time,
       );
     }
   }
 
-  // Werkstattboden.
-  ctx.fillStyle = "#253b53";
-  ctx.fillRect(0, FLOOR, WIDTH, HEIGHT - FLOOR);
+  // Boden.
+  ctx.fillStyle = "#24394d";
+  ctx.fillRect(0, FLOOR, W, H - FLOOR);
 
-  ctx.fillStyle = "#ffcb52";
-  ctx.fillRect(0, FLOOR, WIDTH, 8);
+  ctx.fillStyle = "#ffcb55";
+  ctx.fillRect(0, FLOOR, W, 9);
 
-  ctx.fillStyle = "#b88b32";
-  const offset = game.distance % 32;
-  for (let x = -32; x < WIDTH + 32; x += 32) {
-    ctx.fillRect(x - offset, FLOOR, 14, 8);
+  ctx.fillStyle = "#a8792b";
+
+  for (let x = -32; x < W + 32; x += 32) {
+    ctx.fillRect(
+      x - (game.distance % 32),
+      FLOOR,
+      14,
+      9,
+    );
   }
 
-  ctx.fillStyle = "#56708a";
-  for (let x = -48; x < WIDTH + 48; x += 48) {
+  ctx.fillStyle = "#496176";
+
+  for (let x = -48; x < W + 48; x += 48) {
     ctx.fillRect(
       x - (game.distance % 48),
-      FLOOR + 25,
-      25,
+      FLOOR + 28,
+      24,
       3,
     );
   }
 
-  drawPaul(ctx, game);
+  // Kleine Funken beim Einsammeln.
+  for (const particle of game.particles) {
+    ctx.globalAlpha = Math.max(0, particle.life / 0.6);
+    ctx.fillStyle = "#ffdc64";
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+
+  const idle =
+    game.mode === "menu" || game.mode === "help"
+      ? Math.sin(game.time * 3) * 8
+      : 0;
+
+  const angle =
+    game.mode === "playing"
+      ? Math.max(-0.4, Math.min(0.9, game.velocity / 650))
+      : 0;
+
+  drawPaul(ctx, PX, game.y + idle, angle, game.time);
+
+  if (game.bonus > 0) {
+    ctx.save();
+    ctx.fillStyle = "#fff9c9";
+    ctx.strokeStyle = "#715725";
+    ctx.lineWidth = 3;
+    ctx.font = "900 24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.strokeText("+5", PX + 46, game.y - 34);
+    ctx.fillText("+5", PX + 46, game.y - 34);
+    ctx.restore();
+  }
+}
+
+function PaulPortrait() {
+  return (
+    <svg
+      className="fp-portrait"
+      viewBox="0 0 100 100"
+      aria-hidden="true"
+    >
+      <circle cx="50" cy="50" r="48" fill="#ffce64" />
+      <path
+        d="M22 100V85Q50 63 78 85V100"
+        fill="#397cf8"
+      />
+      <circle cx="20" cy="51" r="7" fill="#efb588" />
+      <circle cx="80" cy="51" r="7" fill="#efb588" />
+      <ellipse
+        cx="50"
+        cy="48"
+        rx="31"
+        ry="34"
+        fill="#ffd1a6"
+      />
+      <path
+        d="M19 44Q12 4 55 10Q85 10 82 42L69 31L61 41L50 29L40 41L30 32Z"
+        fill="#ffe36b"
+      />
+      <g
+        stroke="#25364e"
+        strokeWidth="4"
+        fill="#e7f7ff"
+      >
+        <rect x="23" y="41" width="24" height="21" rx="7" />
+        <rect x="53" y="41" width="24" height="21" rx="7" />
+        <path d="M47 48H53" />
+      </g>
+      <g fill="#25364e">
+        <circle cx="36" cy="51" r="3" />
+        <circle cx="66" cy="51" r="3" />
+      </g>
+      <path
+        d="M41 68Q51 77 62 67"
+        fill="none"
+        stroke="#a15b48"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const actionRef = useRef<(action: Action) => void>(() => {});
 
-  const [hud, setHud] = useState({
-    status: "ready" as Status,
+  const [view, setView] = useState<View>({
+    mode: "menu",
     score: 0,
     tools: 0,
     best: 0,
+    record: false,
   });
 
   useEffect(() => {
@@ -412,188 +507,236 @@ export default function Home() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let storedBest = 0;
+    let best = 0;
 
     try {
-      storedBest = Number(localStorage.getItem(STORAGE_KEY)) || 0;
-      if (!Number.isFinite(storedBest) || storedBest < 0) {
-        storedBest = 0;
+      const saved = Number(localStorage.getItem(RECORD_KEY));
+      if (Number.isFinite(saved) && saved >= 0) {
+        best = saved;
       }
     } catch {
-      // Das Spiel funktioniert auch ohne Browserspeicher.
+      // Das Spiel funktioniert auch ohne lokalen Speicher.
     }
 
-    let game = createGame(storedBest);
-    let frameId = 0;
+    let game = freshGame(best);
+    let animation = 0;
     let previousTime = 0;
 
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = WIDTH * ratio;
-    canvas.height = HEIGHT * ratio;
+    canvas.width = W * ratio;
+    canvas.height = H * ratio;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 
     function publish() {
-      setHud({
-        status: game.status,
+      setView({
+        mode: game.mode,
         score: game.score,
         tools: game.tools,
         best: game.best,
+        record: game.record,
       });
     }
 
-    function addObstacle(x: number) {
-      const previous = game.obstacles.at(-1)?.center ?? 295;
-      const next = previous + (Math.random() - 0.5) * 190;
+    function focusGame() {
+      canvas?.focus({ preventScroll: true });
+    }
 
-      game.obstacles.push({
+    function addGate(x: number) {
+      const previous = game.gates.at(-1)?.center ?? 330;
+      const center = previous + (Math.random() - 0.5) * 170;
+
+      game.gates.push({
         x,
-        center: Math.max(165, Math.min(FLOOR - 145, next)),
+        center: Math.max(190, Math.min(FLOOR - 160, center)),
         collected: false,
         passed: false,
       });
     }
 
     function start() {
-      game = createGame(game.best);
-      game.status = "playing";
-      game.velocity = -345;
+      game = freshGame(game.best);
+      game.mode = "playing";
+      game.velocity = -335;
 
-      addObstacle(WIDTH + 65);
-      addObstacle(WIDTH + 65 + SPACING);
-      addObstacle(WIDTH + 65 + SPACING * 2);
+      addGate(W + 80);
+      addGate(W + 80 + SPACING);
+      addGate(W + 80 + SPACING * 2);
 
       publish();
+      focusGame();
     }
 
-    function finish() {
-      if (game.status !== "playing") return;
+    function end() {
+      if (game.mode !== "playing") return;
 
-      game.status = "over";
+      game.mode = "over";
+      game.record = game.score > game.best;
       game.best = Math.max(game.best, game.score);
 
       try {
-        localStorage.setItem(STORAGE_KEY, String(game.best));
+        localStorage.setItem(RECORD_KEY, String(game.best));
       } catch {
-        // Falls Speichern blockiert ist, bleibt der Rekord
-        // zumindest für die aktuelle Sitzung erhalten.
+        // Rekord bleibt ohne Speicher für diese Sitzung erhalten.
       }
 
       publish();
     }
 
     function act(action: Action) {
-      if (action === "restart") {
+      if (action === "start") {
         start();
         return;
       }
 
+      if (action === "menu") {
+        game = freshGame(game.best);
+        publish();
+        return;
+      }
+
+      if (action === "help") {
+        game.mode = "help";
+        publish();
+        return;
+      }
+
       if (action === "pause") {
-        if (game.status === "playing") {
-          game.status = "paused";
-        } else if (game.status === "paused") {
-          game.status = "playing";
+        if (game.mode === "playing") {
+          game.mode = "paused";
+        } else if (game.mode === "paused") {
+          game.mode = "playing";
+          focusGame();
+        } else if (game.mode === "help") {
+          game.mode = "menu";
         }
 
         publish();
         return;
       }
 
-      if (game.status === "ready" || game.status === "over") {
+      if (game.mode === "playing") {
+        game.velocity = -335;
+        focusGame();
+      } else if (game.mode === "paused") {
+        game.mode = "playing";
+        publish();
+        focusGame();
+      } else if (game.mode === "menu" || game.mode === "over") {
         start();
-      } else if (game.status === "playing") {
-        game.velocity = -345;
       }
     }
 
     actionRef.current = act;
 
     function update(dt: number) {
-      if (game.status === "paused" || game.status === "over") {
+      if (game.mode === "paused" || game.mode === "over") {
         return;
       }
 
       game.time += dt;
 
-      if (game.status !== "playing") return;
+      if (game.mode !== "playing") return;
 
-      game.velocity += 1020 * dt;
+      game.velocity += 970 * dt;
       game.y += game.velocity * dt;
+      game.bonus = Math.max(0, game.bonus - dt);
 
-      const speed = Math.min(240, 170 + game.passed * 3);
+      const speed = Math.min(225, 158 + game.passed * 2.5);
       game.distance += speed * dt;
 
-      for (const obstacle of game.obstacles) {
-        obstacle.x -= speed * dt;
+      for (const gate of game.gates) {
+        gate.x -= speed * dt;
       }
 
-      game.obstacles = game.obstacles.filter(
-        (obstacle) => obstacle.x + PIPE_WIDTH > -30,
+      for (const particle of game.particles) {
+        particle.x += particle.vx * dt;
+        particle.y += particle.vy * dt;
+        particle.vy += 200 * dt;
+        particle.life -= dt;
+      }
+
+      game.particles = game.particles.filter(
+        (particle) => particle.life > 0,
       );
 
-      const last = game.obstacles.at(-1);
-      if (last && last.x < WIDTH + SPACING) {
-        addObstacle(last.x + SPACING);
+      game.gates = game.gates.filter(
+        (gate) => gate.x + GATE_WIDTH > -30,
+      );
+
+      const last = game.gates.at(-1);
+
+      if (last && last.x < W + SPACING) {
+        addGate(last.x + SPACING);
       }
 
-      // Boden und obere Spielfeldkante.
       if (
         game.y - RADIUS < 0 ||
         game.y + RADIUS > FLOOR
       ) {
-        finish();
+        end();
         return;
       }
 
       let changed = false;
 
-      for (const obstacle of game.obstacles) {
-        const top = obstacle.center - GAP / 2;
-        const bottom = obstacle.center + GAP / 2;
+      for (const gate of game.gates) {
+        const top = gate.center - GAP / 2;
+        const bottom = gate.center + GAP / 2;
 
-        const hitsTop = circleHitsRect(
-          PLAYER_X,
-          game.y,
-          RADIUS,
-          obstacle.x,
-          0,
-          PIPE_WIDTH,
-          top,
-        );
-
-        const hitsBottom = circleHitsRect(
-          PLAYER_X,
-          game.y,
-          RADIUS,
-          obstacle.x,
-          bottom,
-          PIPE_WIDTH,
-          FLOOR - bottom,
-        );
-
-        if (hitsTop || hitsBottom) {
-          finish();
+        if (
+          hitsRectangle(
+            PX,
+            game.y,
+            gate.x,
+            0,
+            GATE_WIDTH,
+            top,
+          ) ||
+          hitsRectangle(
+            PX,
+            game.y,
+            gate.x,
+            bottom,
+            GATE_WIDTH,
+            FLOOR - bottom,
+          )
+        ) {
+          end();
           return;
         }
 
-        const toolX = obstacle.x + PIPE_WIDTH / 2;
+        const toolX = gate.x + GATE_WIDTH / 2;
         const toolY =
-          obstacle.center + Math.sin(game.time * 4) * 4;
+          gate.center + Math.sin(game.time * 4) * 4;
 
         if (
-          !obstacle.collected &&
-          Math.hypot(PLAYER_X - toolX, game.y - toolY) < 36
+          !gate.collected &&
+          Math.hypot(PX - toolX, game.y - toolY) < 35
         ) {
-          obstacle.collected = true;
+          gate.collected = true;
           game.tools += 1;
           game.score += 5;
+          game.bonus = 0.65;
           changed = true;
+
+          for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2;
+
+            game.particles.push({
+              x: toolX,
+              y: toolY,
+              vx: Math.cos(angle) * 90,
+              vy: Math.sin(angle) * 90,
+              life: 0.6,
+            });
+          }
         }
 
         if (
-          !obstacle.passed &&
-          obstacle.x + PIPE_WIDTH < PLAYER_X - RADIUS
+          !gate.passed &&
+          gate.x + GATE_WIDTH < PX - RADIUS
         ) {
-          obstacle.passed = true;
+          gate.passed = true;
           game.passed += 1;
           game.score += 1;
           changed = true;
@@ -610,14 +753,14 @@ export default function Home() {
 
       previousTime = timestamp;
 
-      // Kleine Physikschritte für zuverlässigere Kollisionen.
       const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+
       for (let i = 0; i < steps; i++) {
         update(dt / steps);
       }
 
       drawScene(ctx!, game);
-      frameId = requestAnimationFrame(frame);
+      animation = requestAnimationFrame(frame);
     }
 
     function onKey(event: KeyboardEvent) {
@@ -628,239 +771,671 @@ export default function Home() {
         return;
       }
 
-      if (["Space", "ArrowUp", "KeyP", "Escape"].includes(event.code)) {
-        event.preventDefault();
-        if (event.repeat) return;
-
-        act(
-          event.code === "KeyP" || event.code === "Escape"
-            ? "pause"
-            : "flap",
-        );
+      if (
+        !["Space", "ArrowUp", "KeyP", "Escape"].includes(
+          event.code,
+        )
+      ) {
+        return;
       }
+
+      event.preventDefault();
+      if (event.repeat) return;
+
+      act(
+        event.code === "KeyP" || event.code === "Escape"
+          ? "pause"
+          : "flap",
+      );
     }
 
     function onPointer(event: PointerEvent) {
       if (event.button !== 0) return;
       event.preventDefault();
-      canvas?.focus({ preventScroll: true });
       act("flap");
     }
 
-    function pauseWhenHidden() {
-      if (game.status === "playing") {
-        game.status = "paused";
+    function pause() {
+      if (game.mode === "playing") {
+        game.mode = "paused";
         publish();
       }
     }
 
     function onVisibility() {
-      if (document.hidden) pauseWhenHidden();
+      if (document.hidden) pause();
     }
 
     publish();
-    frameId = requestAnimationFrame(frame);
+    animation = requestAnimationFrame(frame);
 
     canvas.addEventListener("pointerdown", onPointer);
     window.addEventListener("keydown", onKey);
-    window.addEventListener("blur", pauseWhenHidden);
+    window.addEventListener("blur", pause);
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      cancelAnimationFrame(frameId);
+      cancelAnimationFrame(animation);
       canvas.removeEventListener("pointerdown", onPointer);
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", pauseWhenHidden);
-      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("blur", pause);
+      document.removeEventListener(
+        "visibilitychange",
+        onVisibility,
+      );
       actionRef.current = () => {};
     };
   }, []);
 
+  const act = (action: Action) => actionRef.current(action);
+
   return (
-    <main className={styles.page}>
-      <div className={styles.layout}>
-        <section className={styles.gameSection}>
-          <header className={styles.header}>
-            <div className={styles.badge}>DAS WERKSTATT-ABENTEUER</div>
-            <h1>
-              FLAPPY <span>PAUL</span>
-            </h1>
-            <p>Blonde Haare. Große Brille. Noch größere Mission.</p>
-          </header>
+    <main className="fp-shell">
+      <style>{`
+        html, body {
+          margin: 0;
+          padding: 0;
+          background: #0b1627;
+        }
 
-          <div className={styles.scoreboard}>
-            <div>
-              <span>PUNKTE</span>
-              <strong>{hud.score}</strong>
+        .fp-shell, .fp-shell * {
+          box-sizing: border-box;
+        }
+
+        .fp-shell {
+          position: fixed;
+          inset: 0;
+          display: grid;
+          place-items: center;
+          overflow: auto;
+          padding: 12px;
+          background:
+            radial-gradient(ellipse at 25% 20%, #23486d, transparent 55%),
+            radial-gradient(ellipse at 85% 85%, #29413e, transparent 45%),
+            #0b1627;
+          color: #fff;
+          font-family: Arial, Helvetica, sans-serif;
+        }
+
+        .fp-game {
+          position: relative;
+          width: min(100%, calc((100svh - 24px) * 0.6), 460px);
+          aspect-ratio: 3 / 5;
+          overflow: hidden;
+          flex-shrink: 0;
+          border-radius: 25px;
+          border: 1px solid #ffffff35;
+          background: #8bd0ee;
+          box-shadow:
+            0 35px 100px #0007,
+            0 0 0 6px #ffffff04;
+          isolation: isolate;
+        }
+
+        .fp-canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+          touch-action: none;
+          cursor: pointer;
+          outline: none;
+        }
+
+        .fp-canvas:focus-visible {
+          outline: 3px solid #ffe18b;
+          outline-offset: -3px;
+        }
+
+        .fp-overlay {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 18px;
+          overflow-y: auto;
+          background: linear-gradient(#0c21383b, #0c213870);
+          backdrop-filter: blur(5px);
+        }
+
+        .fp-card {
+          width: 100%;
+          max-width: 335px;
+          padding: clamp(16px, 3svh, 30px) 24px;
+          border: 1px solid #ffffff26;
+          border-radius: 26px;
+          background: linear-gradient(155deg, #20354ff5, #101f34fa);
+          box-shadow: 0 20px 50px #10203555;
+          text-align: center;
+        }
+
+        .fp-label {
+          margin: 0 0 12px;
+          color: #f9ce74;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 2px;
+        }
+
+        .fp-title {
+          margin: 0;
+          color: #fff;
+          font-size: clamp(34px, 6svh, 52px);
+          font-weight: 900;
+          line-height: 0.98;
+          letter-spacing: -2px;
+        }
+
+        .fp-title span {
+          display: block;
+          color: #ffd16b;
+          font-size: 1.3em;
+          text-shadow: 0 4px 0 #9e642a;
+        }
+
+        .fp-portrait {
+          display: block;
+          width: clamp(60px, 12svh, 96px);
+          height: auto;
+          margin: 18px auto 12px;
+          filter: drop-shadow(0 7px 10px #0003);
+        }
+
+        .fp-copy {
+          margin: 14px 0 20px;
+          color: #c4d3e5;
+          font-size: 13px;
+          line-height: 1.65;
+        }
+
+        .fp-button {
+          display: block;
+          width: 100%;
+          margin-top: 10px;
+          padding: 14px 12px;
+          border: 0;
+          border-radius: 13px;
+          background: #ffd16b;
+          color: #34280e;
+          font: inherit;
+          font-size: 14px;
+          font-weight: 800;
+          cursor: pointer;
+          box-shadow: 0 4px 0 #b7812c;
+        }
+
+        .fp-button:hover {
+          background: #ffdf97;
+        }
+
+        .fp-button:active {
+          transform: translateY(2px);
+          box-shadow: 0 2px 0 #b7812c;
+        }
+
+        .fp-secondary {
+          background: #ffffff09;
+          color: #e6eef9;
+          border: 1px solid #ffffff20;
+          box-shadow: none;
+        }
+
+        .fp-secondary:hover {
+          background: #ffffff17;
+        }
+
+        .fp-secondary:active {
+          box-shadow: none;
+        }
+
+        .fp-button:focus-visible,
+        .fp-pause:focus-visible {
+          outline: 3px solid #fff;
+          outline-offset: 3px;
+        }
+
+        .fp-hint {
+          margin: 18px 0 0;
+          color: #93aac4;
+          font-size: 10px;
+          line-height: 1.6;
+        }
+
+        .fp-best {
+          display: inline-block;
+          margin-top: 18px;
+          padding: 7px 13px;
+          border: 1px solid #ffd16b26;
+          border-radius: 50px;
+          color: #ffd16b;
+          background: #ffd16b08;
+          font-size: 11px;
+        }
+
+        .fp-hud {
+          position: absolute;
+          top: 17px;
+          left: 17px;
+          right: 17px;
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          pointer-events: none;
+        }
+
+        .fp-live-score {
+          min-width: 95px;
+          padding: 11px 15px;
+          border: 1px solid #ffffff33;
+          border-radius: 16px;
+          background: #142942d9;
+          box-shadow: 0 6px 20px #0001;
+        }
+
+        .fp-live-score small {
+          display: block;
+          color: #c2d4e7;
+          font-size: 9px;
+          letter-spacing: 1.5px;
+        }
+
+        .fp-live-score strong {
+          display: block;
+          margin: 3px 0;
+          color: #fff;
+          font-size: 32px;
+          line-height: 1;
+          font-variant-numeric: tabular-nums;
+        }
+
+        .fp-live-score span {
+          color: #ffdb89;
+          font-size: 11px;
+        }
+
+        .fp-pause {
+          width: 43px;
+          height: 43px;
+          border: 1px solid #ffffff38;
+          border-radius: 13px;
+          background: #142942df;
+          color: white;
+          font-size: 22px;
+          cursor: pointer;
+          pointer-events: auto;
+        }
+
+        .fp-heading {
+          margin: 8px 0 14px;
+          color: #fff;
+          font-size: clamp(25px, 4.5svh, 34px);
+          font-weight: 900;
+          letter-spacing: -1px;
+        }
+
+        .fp-symbol {
+          display: block;
+          margin-bottom: 12px;
+          font-size: 38px;
+        }
+
+        .fp-result {
+          margin: 20px 0;
+          padding: 18px 12px;
+          border: 1px solid #ffffff13;
+          border-radius: 18px;
+          background: #00000020;
+        }
+
+        .fp-result > span {
+          color: #acc0d9;
+          font-size: 10px;
+          letter-spacing: 2px;
+        }
+
+        .fp-result > strong {
+          display: block;
+          margin: 5px 0 14px;
+          color: #ffda80;
+          font-size: 58px;
+          font-weight: 900;
+          line-height: 1;
+        }
+
+        .fp-result-row {
+          display: flex;
+          justify-content: space-around;
+          gap: 12px;
+          color: #c2d1e3;
+          font-size: 11px;
+          line-height: 1.7;
+        }
+
+        .fp-result-row b {
+          display: block;
+          color: #fff;
+          font-size: 20px;
+        }
+
+        .fp-rules {
+          display: grid;
+          gap: 14px;
+          margin: 20px 0;
+          text-align: left;
+        }
+
+        .fp-rule {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+        }
+
+        .fp-rule > span {
+          display: grid;
+          flex: 0 0 30px;
+          height: 30px;
+          place-items: center;
+          border-radius: 10px;
+          background: #ffd16b15;
+          color: #ffd16b;
+          font-size: 12px;
+          font-weight: bold;
+        }
+
+        .fp-rule p {
+          margin: 0;
+          color: #bacce1;
+          font-size: 12px;
+          line-height: 1.6;
+        }
+
+        .fp-rule b {
+          display: block;
+          margin-bottom: 3px;
+          color: #fff;
+          font-size: 13px;
+        }
+
+        .fp-sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          overflow: hidden;
+          clip-path: inset(50%);
+          white-space: nowrap;
+        }
+
+        @media (max-height: 600px) {
+          .fp-card {
+            padding: 14px 18px;
+          }
+
+          .fp-portrait {
+            width: 55px;
+            margin: 10px auto;
+          }
+
+          .fp-copy {
+            margin: 10px 0;
+            font-size: 11px;
+          }
+
+          .fp-button {
+            padding: 10px;
+            font-size: 12px;
+          }
+
+          .fp-best, .fp-hint {
+            margin-top: 10px;
+          }
+
+          .fp-rules {
+            gap: 8px;
+            margin: 12px 0;
+          }
+        }
+      `}</style>
+
+      <section className="fp-game" aria-label="Flappy Paul">
+        <canvas
+          ref={canvasRef}
+          width={W}
+          height={H}
+          className="fp-canvas"
+          tabIndex={0}
+          aria-label="Spielfeld. Mit Leertaste, Pfeil nach oben oder Antippen fliegen. Mit P pausieren."
+        />
+
+        {view.mode === "playing" && (
+          <div className="fp-hud">
+            <div className="fp-live-score">
+              <small>PUNKTE</small>
+              <strong>{view.score}</strong>
+              <span>🪛 {view.tools}</span>
             </div>
-            <div>
-              <span>WERKZEUGE</span>
-              <strong>{hud.tools}</strong>
-            </div>
-            <div>
-              <span>REKORD</span>
-              <strong>{hud.best}</strong>
-            </div>
+
+            <button
+              className="fp-pause"
+              onClick={() => act("pause")}
+              aria-label="Spiel pausieren"
+            >
+              Ⅱ
+            </button>
           </div>
+        )}
 
-          <div className={styles.stage}>
-            <canvas
-              ref={canvasRef}
-              className={styles.canvas}
-              width={WIDTH}
-              height={HEIGHT}
-              tabIndex={0}
-              aria-label="Flappy Paul. Mit Leertaste, Pfeil nach oben oder Antippen fliegen. Mit P pausieren."
-            />
+        {view.mode !== "playing" && (
+          <div className="fp-overlay">
+            <div className="fp-card">
+              {view.mode === "menu" && (
+                <>
+                  <p className="fp-label">WERKSTATT ARCADE</p>
 
-            {hud.status !== "playing" && (
-              <div className={styles.overlay}>
-                <div className={styles.dialog}>
-                  <span className={styles.dialogIcon}>
-                    {hud.status === "over"
-                      ? "💫"
-                      : hud.status === "paused"
-                        ? "⏸"
-                        : "🪛"}
-                  </span>
+                  <h1 className="fp-title">
+                    FLAPPY <span>PAUL</span>
+                  </h1>
 
-                  <h2>
-                    {hud.status === "over"
-                      ? "Autsch, Paul!"
-                      : hud.status === "paused"
-                        ? "Werkstattpause"
-                        : "Bereit zum Abheben?"}
-                  </h2>
+                  <PaulPortrait />
 
-                  <p>
-                    {hud.status === "over"
-                      ? `${hud.score} Punkte und ${hud.tools} Schraubenzieher. Schaffst du noch mehr?`
-                      : hud.status === "paused"
-                        ? "Kurz durchatmen. Deine Runde wartet auf dich."
-                        : "Flieg durch die Lücken und sammle die Schraubenzieher!"}
+                  <p className="fp-copy">
+                    Kleine Flügel. Große Mission.
+                    <br />
+                    Wie viele Werkzeuge schaffst du?
                   </p>
 
                   <button
-                    className={styles.primaryButton}
-                    onClick={() =>
-                      actionRef.current(
-                        hud.status === "paused" ? "pause" : "restart",
-                      )
-                    }
+                    className="fp-button"
+                    onClick={() => act("start")}
                   >
-                    {hud.status === "over"
-                      ? "Noch eine Runde"
-                      : hud.status === "paused"
-                        ? "Weiterfliegen"
-                        : "Los geht’s!"}
+                    ▶ Spiel starten
                   </button>
 
-                  <small>
-                    {hud.status === "paused"
-                      ? "Oder P zum Fortsetzen drücken"
-                      : "Leertaste · Klicken · Antippen"}
-                  </small>
-                </div>
-              </div>
-            )}
-          </div>
+                  <button
+                    className="fp-button fp-secondary"
+                    onClick={() => act("help")}
+                  >
+                    So wird gespielt
+                  </button>
 
-          <div className={styles.controls}>
-            <button
-              className={styles.secondaryButton}
-              disabled={
-                hud.status === "ready" || hud.status === "over"
-              }
-              onClick={() => actionRef.current("pause")}
-            >
-              {hud.status === "paused" ? "▶ Weiter" : "Ⅱ Pause"}
-            </button>
+                  <div className="fp-best">
+                    🏆 Dein Rekord: {view.best}
+                  </div>
 
-            <button
-              className={styles.secondaryButton}
-              onClick={() => actionRef.current("restart")}
-            >
-              ↻ Neustart
-            </button>
-          </div>
+                  <p className="fp-hint">
+                    Leertaste · Klicken · Antippen
+                  </p>
+                </>
+              )}
 
-          <p className={styles.status} role="status" aria-live="polite">
-            {hud.status === "playing"
-              ? "Paul ist unterwegs. Viel Erfolg!"
-              : hud.status === "paused"
-                ? "Das Spiel ist pausiert."
-                : hud.status === "over"
-                  ? `Runde beendet: ${hud.score} Punkte.`
-                  : "Deine nächste Bestleistung wartet."}
-          </p>
-        </section>
+              {view.mode === "help" && (
+                <>
+                  <p className="fp-label">PAULS FLUGSCHULE</p>
+                  <h2 className="fp-heading">So funktioniert’s</h2>
 
-        <aside className={styles.instructions}>
-          <div className={styles.badge}>PAULS FLUGSCHULE</div>
-          <h2>Kleine Flügel.<br />Große Pläne.</h2>
-          <p className={styles.intro}>
-            Paul muss durch die Werkstatt. Hilf ihm, zwischen den
-            Metallträgern hindurchzufliegen und seine Werkzeuge
-            einzusammeln.
-          </p>
+                  <div className="fp-rules">
+                    <div className="fp-rule">
+                      <span>1</span>
+                      <p>
+                        <b>Paul in der Luft halten</b>
+                        Tippe ins Spielfeld oder drücke die
+                        Leertaste beziehungsweise ↑. Jeder
+                        Impuls lässt Paul steigen.
+                      </p>
+                    </div>
 
-          <div className={styles.instructionItem}>
-            <span className={styles.number}>01</span>
-            <div>
-              <h3>Abheben</h3>
-              <p>
-                Drücke <kbd>Leertaste</kbd> oder <kbd>↑</kbd>.
-                Alternativ klickst du ins Spielfeld oder tippst
-                es auf dem Handy an.
-              </p>
+                    <div className="fp-rule">
+                      <span>2</span>
+                      <p>
+                        <b>Durch die Lücken fliegen</b>
+                        Vermeide Metallträger, Boden und obere
+                        Spielfeldkante. Pro Hindernis gibt es
+                        einen Punkt.
+                      </p>
+                    </div>
+
+                    <div className="fp-rule">
+                      <span>3</span>
+                      <p>
+                        <b>Schraubenzieher einsammeln</b>
+                        Jeder Schraubenzieher bringt fünf
+                        zusätzliche Punkte.
+                      </p>
+                    </div>
+
+                    <div className="fp-rule">
+                      <span>Ⅱ</span>
+                      <p>
+                        <b>Eine Pause machen</b>
+                        Nutze den Pause-Button, P oder Esc.
+                        Beim Verlassen des Tabs pausiert das
+                        Spiel automatisch.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    className="fp-button"
+                    onClick={() => act("start")}
+                  >
+                    Verstanden – los geht’s!
+                  </button>
+
+                  <button
+                    className="fp-button fp-secondary"
+                    onClick={() => act("menu")}
+                  >
+                    Zurück
+                  </button>
+                </>
+              )}
+
+              {view.mode === "paused" && (
+                <>
+                  <span className="fp-symbol">⏸</span>
+                  <p className="fp-label">KURZE WERKSTATTPAUSE</p>
+                  <h2 className="fp-heading">Durchatmen, Paul.</h2>
+
+                  <p className="fp-copy">
+                    Deine {view.score} Punkte warten auf dich.
+                    <br />
+                    Bereit für den nächsten Schraubenzieher?
+                  </p>
+
+                  <button
+                    className="fp-button"
+                    onClick={() => act("pause")}
+                  >
+                    ▶ Weiterfliegen
+                  </button>
+
+                  <button
+                    className="fp-button fp-secondary"
+                    onClick={() => act("start")}
+                  >
+                    ↻ Neu starten
+                  </button>
+
+                  <button
+                    className="fp-button fp-secondary"
+                    onClick={() => act("menu")}
+                  >
+                    Zum Hauptmenü
+                  </button>
+                </>
+              )}
+
+              {view.mode === "over" && (
+                <>
+                  <span className="fp-symbol">
+                    {view.record ? "🏆" : "💫"}
+                  </span>
+
+                  <p className="fp-label">
+                    {view.record
+                      ? "NEUER PERSÖNLICHER REKORD!"
+                      : "RUNDE BEENDET"}
+                  </p>
+
+                  <h2 className="fp-heading">
+                    {view.record ? "Stark, Paul!" : "Autsch, Paul!"}
+                  </h2>
+
+                  <div className="fp-result">
+                    <span>DEINE PUNKTE</span>
+                    <strong>{view.score}</strong>
+
+                    <div className="fp-result-row">
+                      <div>
+                        Schraubenzieher
+                        <b>🪛 {view.tools}</b>
+                      </div>
+
+                      <div>
+                        Bester Punktestand
+                        <b>🏆 {view.best}</b>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    className="fp-button"
+                    onClick={() => act("start")}
+                  >
+                    ↻ Noch eine Runde
+                  </button>
+
+                  <button
+                    className="fp-button fp-secondary"
+                    onClick={() => act("menu")}
+                  >
+                    Zum Hauptmenü
+                  </button>
+
+                  <p className="fp-hint">
+                    Dein Rekord wird in diesem Browser
+                    gespeichert, sofern Speicher verfügbar ist.
+                  </p>
+                </>
+              )}
             </div>
           </div>
+        )}
 
-          <div className={styles.instructionItem}>
-            <span className={styles.number}>02</span>
-            <div>
-              <h3>Die Lücke treffen</h3>
-              <p>
-                Jeder Impuls trägt Paul nach oben. Dazwischen
-                sinkt er. Vermeide Träger, Boden und die obere
-                Spielfeldkante.
-              </p>
-            </div>
-          </div>
-
-          <div className={styles.instructionItem}>
-            <span className={styles.number}>03</span>
-            <div>
-              <h3>Werkzeug einsammeln</h3>
-              <p>
-                Ein Hindernis bringt <strong>+1 Punkt</strong>.
-                Jeder Schraubenzieher bringt zusätzlich
-                <strong> +5 Punkte</strong>.
-              </p>
-            </div>
-          </div>
-
-          <div className={styles.tip}>
-            <strong>Pauls Profi-Tipp</strong>
-            <p>
-              Kurze, gleichmäßige Impulse helfen mehr als wildes
-              Tippen. Je weiter du kommst, desto schneller wird
-              die Werkstatt!
-            </p>
-          </div>
-
-          <p className={styles.note}>
-            Pause mit <kbd>P</kbd> oder <kbd>Esc</kbd>. Beim
-            Wechsel in einen anderen Tab pausiert die Runde
-            automatisch. Dein Rekord wird in diesem Browser
-            gespeichert, sofern Browserspeicher verfügbar ist.
-          </p>
-        </aside>
-      </div>
-
-      <footer className={styles.footer}>
-        FLAPPY PAUL · Immer eine Schraubenzieherlänge voraus.
-      </footer>
+        <span
+          className="fp-sr-only"
+          role="status"
+          aria-live="polite"
+        >
+          {view.mode === "over"
+            ? `Runde beendet. ${view.score} Punkte und ${view.tools} Schraubenzieher. Rekord: ${view.best}.`
+            : view.mode === "paused"
+              ? "Spiel pausiert."
+              : view.mode === "playing"
+                ? "Spiel gestartet."
+                : "Flappy Paul Hauptmenü."}
+        </span>
+      </section>
     </main>
   );
 }
