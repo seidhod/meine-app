@@ -2,6 +2,8 @@
 
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { getDatabase } from "firebase/database";
+
 
 const firebaseConfig = {
   apiKey: "AIzaSyBhPhGwWdr7UbdbzSfhc7cmBbfmIG1JfnM",
@@ -20,3 +22,5 @@ export const firebaseApp =
 
 // Anmeldedienst für unsere spätere Anmeldeseite bereitstellen.
 export const auth = getAuth(firebaseApp);
+// Realtime Database für die spätere Datenspeicherung bereitstellen.
+export const database = getDatabase(firebaseApp);
